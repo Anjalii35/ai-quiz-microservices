@@ -1,0 +1,83 @@
+x-eureka-env: &eureka-env
+  EUREKA_URL: http://service-registry:8761/eureka
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${DB_USERNAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  service-registry:
+    build: ./service-registry
+    ports:
+      - "8761:8761"
+
+  question-service:
+    build: ./question-service
+    ports:
+      - "8081:8080"
+    environment:
+      <<: *eureka-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/questiondb
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      service-registry:
+        condition: service_started
+    restart: on-failure
+
+  quiz-service:
+    build: ./quiz-service
+    ports:
+      - "8090:8090"
+    environment:
+      <<: *eureka-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/quizdb
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      service-registry:
+        condition: service_started
+    restart: on-failure
+
+  java-ai-agent:
+    build: ./java-ai-agent
+    ports:
+      - "8100:8100"
+    environment:
+      <<: *eureka-env
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+    depends_on:
+      service-registry:
+        condition: service_started
+    restart: on-failure
+
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8765:8765"
+    environment:
+      <<: *eureka-env
+    depends_on:
+      service-registry:
+        condition: service_started
+    restart: on-failure
+
+volumes:
+  pgdata:

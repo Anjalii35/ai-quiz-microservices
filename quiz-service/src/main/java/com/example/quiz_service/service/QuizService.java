@@ -21,15 +21,15 @@ public class QuizService {
     @Autowired
     private QuizInterface quizInterface;
 
-    public ResponseEntity<String> createQuiz(String category, int noOfQues, String title) {
+    public ResponseEntity<Integer> createQuiz(String category, int noOfQues, String title) {
 
         List<Integer> questions = quizInterface.getQuestionsForQuiz(category, noOfQues).getBody();
         Quiz quiz = new Quiz();
         quiz.setTitle(title);
         quiz.setQuestionsIds(questions);
-        quizRepo.save(quiz);
+        Quiz saved = quizRepo.save(quiz);
 
-        return new ResponseEntity<>("Quiz Successfully Created !!", HttpStatus.CREATED);
+        return new ResponseEntity<>(saved.getId(), HttpStatus.CREATED);
     }
 
     public ResponseEntity<List<QuestionWrapper>> getQuizQuestions(int id){
