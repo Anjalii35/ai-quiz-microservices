@@ -1,41 +1,92 @@
-# Quiz App — Spring Boot Microservices
+# AI Quiz Microservices
 
-A quiz application built as four independent Spring Boot services, demonstrating service discovery, an API gateway, and inter-service communication via Feign — rather than a single monolithic app.
+An AI-powered quiz platform built as independent Spring Boot microservices. Questions can be generated on any topic by an LLM (Claude via OpenRouter), saved to the question bank, and accessed through a React-based interface. Demonstrates service discovery, an API gateway, inter-service communication via Feign, and a one-command Docker Compose setup.
+ 
+## Features
+ 
+- **AI question generation** — type a topic (e.g. "Java", "SQL"), get validated multiple-choice questions saved straight to the database
+- **Explain with AI** — for any wrong answer, ask the AI to explain the correct one
+- **Quiz flow** — create a quiz from a category, answer, submit, get a score computed by the backend
+- **Timed mode**, **quiz history** and **stats** in the React UI
+- **Docker Compose** — whole backend (5 services + Postgres) starts with one command
+  
+## Running with Docker (recommended)
+ 
+**Prerequisites:** Docker Desktop, Node.js 18+, an [OpenRouter](https://openrouter.ai) API key.
+ 
+**1. Clone the repo**
+ 
+```bash
+git clone https://github.com/Anjalii35/ai-quiz-microservices.git
+cd ai-quiz-microservices
+```
+ 
+**2. Create a `.env` file in the project root**
+ 
+```
+DB_USERNAME=postgres
+DB_PASSWORD=your_password
+OPENROUTER_API_KEY=your_openrouter_key
+```
+ 
+**3. Start the backend** (Eureka, gateway, all services, Postgres)
+ 
+```bash
+docker compose up -d --build
+```
+ 
+Wait 4-5 minutes, then open `http://localhost:8761`. You should see `API-GATEWAY`, `QUESTION-SERVICE`, `QUIZ-SERVICE` and `JAVA-AI-AGENT` registered.
+ 
+**4. Start the frontend**
+ 
+```bash
+cd frontend
+npm install
+npm start
+```
+ 
+Open `http://localhost:3000`, generate questions for a topic, then start a quiz.
+ 
+**5. Stop everything**
+ 
+```bash
+docker compose down
+```
 
 ## Architecture
 
 ```
-                     ┌───────────────────┐
-                     │  Client (browser  │
-                     │   / Postman)      │
-                     └─────────┬─────────┘
-                               │
-                               ▼
-                     ┌───────────────────┐
-                     │   API Gateway      │  :8765
-                     │  routes requests   │
-                     │  via Eureka lookup │
-                     └─────────┬─────────┘
-                               │
-                 ┌─────────────┴─────────────┐
-                 ▼                           ▼
-        ┌─────────────────┐         ┌──────────────────┐
-        │  Quiz Service    │◄───────►│ Question Service │
-        │  :8090           │  Feign  │                  │
-        │  owns: Quiz +    │  client │ owns: Question + │
-        │  quizdb          │         │ questiondb       │
-        └─────────────────┘         └──────────────────┘
-                 ▲                           ▲
-                 │       registers with      │
-                 └─────────────┬─────────────┘
-                               ▼
-                     ┌───────────────────┐
-                     │  Service Registry  │  :8761
-                     │   (Eureka Server)  │
-                     └───────────────────┘
+                          ┌───────────────────┐
+                          │   React Frontend  │   :3000
+                          └─────────┬─────────┘
+                                    │
+                                    ▼
+                          ┌────────────────────┐
+                          │    API Gateway     │  :8765
+                          │  routes requests   │
+                          │  via Eureka lookup │
+                          └─────────┬──────────┘
+                                    │
+        ┌───────────────────────────┼────────────────────────────┐
+        ▼                           ▼                            ▼
+┌───────────────┐         ┌───────────────────┐         ┌─────────────────┐
+│  Quiz Service │◄───────►│  Question Service │◄───────►│  Java AI Agent  │
+│  :8090        │  Feign  │  :8080            │  Feign  │  :8100          │
+│  owns: Quiz + │  client |  owns: Question + |  client │  Claude via     │
+|  quizdb       │         │  questiondb       │         │  OpenRouter     │
+└───────────────┘         └───────────────────┘         └─────────────────┘
+        ▲                           ▲                            ▲
+        │                  all register with Eureka              │
+        └───────────────────────────┬────────────────────────────┘
+                                    │
+                                    ▼
+                            ┌───────────────────┐
+                            │  Service Registry │  :8761
+                            │   (Eureka Server) │
+                            └───────────────────┘
 ```
 
-All four services register themselves with the **Eureka service registry** on startup. The **API Gateway** is the single entry point — it looks up the target service by name in Eureka and routes the request there, so no service address is ever hardcoded. **Quiz Service** owns quiz composition and scoring; when it needs actual question data, it calls **Question Service** through a Feign client, which itself resolves the target instance via Eureka. Each business service (question-service, quiz-service) owns its own Postgres database — there's no shared schema between them.
+All services register themselves with the **Eureka service registry** on startup. The **API Gateway** is the single entry point — it looks up the target service by name in Eureka and routes the request there, so no service address is ever hardcoded. **Quiz Service** and **Java AI Agent** call **Question Service** through Feign clients that resolve the target via Eureka. Each business service owns its own Postgres database, with no shared schema.
 
 ## Services
 
@@ -43,69 +94,32 @@ All four services register themselves with the **Eureka service registry** on st
 |---|---|---|
 | `service-registry` | 8761 | Eureka server — service discovery |
 | `api-gateway` | 8765 | Single entry point, routes requests to the right service |
-| `question-service` | 8080 | Owns questions/answers and `questiondb` |
+| `question-service` | 8080 (8081 in Docker) | Owns questions/answers and `questiondb` |
 | `quiz-service` | 8090 | Owns quizzes and `quizdb`, coordinates with question-service |
+| `java-ai-agent` | 8100 | Generates questions and explanations with an LLM, saves via question-service |
+| `frontend` | 3000 | React UI |
 
 ## Tech stack
 
 - Java 21, Spring Boot
-- Spring Cloud Netflix Eureka (service discovery)
-- Spring Cloud Gateway (API gateway, discovery-locator routing)
-- Spring Cloud OpenFeign (inter-service HTTP calls)
+- Spring Cloud Netflix Eureka, Spring Cloud Gateway, Spring Cloud OpenFeign
 - Spring Data JPA + PostgreSQL
-- Maven
+- LLM: Claude via OpenRouter (Anthropic Messages API format)
+- React, Tailwind CSS
+- Docker, Docker Compose, Maven
 
-## Request flow — example
-
-`GET /quiz-service/quiz/get/{id}` (fetch questions for a quiz):
-
-1. Client sends the request to the **API Gateway**.
-2. Gateway resolves `quiz-service` via Eureka and forwards the request.
-3. `QuizController` loads the `Quiz` row (with its list of question IDs) from `quizdb`.
-4. `QuizService` calls `question-service` through the Feign client, which resolves `QUESTION-SERVICE` via Eureka and makes the actual HTTP call.
-5. `question-service` fetches the questions and returns them as `QuestionWrapper` objects — with the correct answer stripped out, since this response goes to the client.
-6. The response flows back through the same chain to the client.
-
-## Running locally
-
-**Prerequisites:** Java 21, Maven, PostgreSQL running locally with two databases created (`questiondb`, `quizdb`).
-
-**1. Set environment variables** (each service reads DB credentials from the environment, not hardcoded values):
-
-```
-DB_USERNAME=your_postgres_username
-DB_PASSWORD=your_postgres_password
-```
-
-**2. Start the services in this order** (each in its own terminal, from inside its folder):
-
-```bash
-# 1. Registry first — everything else depends on it being up
-cd service-registry
-./mvnw spring-boot:run
-
-# 2. Then the business services (any order)
-cd question-service
-./mvnw spring-boot:run
-
-cd quiz-service
-./mvnw spring-boot:run
-
-# 3. Gateway last
-cd api-gateway
-./mvnw spring-boot:run
-```
-
-**3. Check the Eureka dashboard** at `http://localhost:8761` — you should see all four services registered (`API-GATEWAY`, `QUESTION-SERVICE`, `QUIZ-SERVICE`) after they finish starting.
-
-**4. Hit the app** through the gateway, e.g.:
-
-```
-POST http://localhost:8765/quiz-service/quiz/create
-GET  http://localhost:8765/quiz-service/quiz/get/{id}
-POST http://localhost:8765/quiz-service/quiz/submit/{id}
-```
+## AI flow — example
+ 
+`POST /java-ai-agent/ai/generate` with `{ "category": "Java", "count": 5 }`:
+ 
+1. Request goes through the **API Gateway** to `java-ai-agent`.
+2. `AiQuizService` asks the LLM for `count` multiple-choice questions as JSON.
+3. The response is parsed and **validated** (4 options, the right answer must be one of the options); invalid items are skipped.
+4. Valid questions are saved through the Feign client to `question-service`.
+5. The UI reloads the question bank, and the new questions are ready for a quiz.
+`POST /java-ai-agent/ai/explain` with `{ question, yourAnswer, correctAnswer }` returns a short explanation.
 
 ## Notes
-
-This project was built to learn the core microservices patterns — service discovery, an API gateway, and typed inter-service calls via Feign — as a stepping stone before designing a fresh microservices project from scratch.
+ 
+- The default model is `openrouter/free`; change `anthropic.model` in `java-ai-agent/src/main/resources/application.properties` to use a fixed model for more consistent output.
+- Quiz history and stats are stored in the browser (localStorage), so no backend change was needed.
